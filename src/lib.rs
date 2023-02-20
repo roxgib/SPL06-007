@@ -101,8 +101,6 @@ pub enum Mode {
 /// sampling and oversampling rates. The oversampling rate is the number of samples taken and
 /// averaged to produce a single reading. The sampling rate is the number of times per second
 /// that the sensor will record a new reading.
-///
-/// Note that oversampling rates above 8 are currently broken due to a bitshift bug.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum SampleRate {
     /// Take a single measurement per second or single oversample per measurement.
@@ -116,20 +114,17 @@ pub enum SampleRate {
     /// value.
     Eight = 0b011,
     /// Sixteen measurements per second or sixteen oversamples per measurement. Labelled "Standard"
-    ///  mode in the datasheet. Note that values above Eight are currently broken due to a bitshift
-    /// bug.
+    ///  mode in the datasheet.
     Sixteen = 0b100,
-    /// Thirty-two measurements per second or thirty-two oversamples per measurement. Note that
-    /// values above Eight are currently broken due to a bitshift bug.
+    /// Thirty-two measurements per second or thirty-two oversamples per measurement.
     ThirtyTwo = 0b101,
     /// Sixty-four measurements per second or sixty-four oversamples per measurement. Labelled
-    /// "High Precision" mode in the datasheet. Note that values above Eight are currently broken
-    /// due to a bitshift bug.
+    /// "High Precision" mode in the datasheet.
     SixtyFour = 0b110,
     /// One hundred twenty-eight measurements per second or one hundred twenty-eight oversamples
-    /// per measurement. Note that values above Eight are currently broken due to a bitshift bug.
+    /// per measurement. 
     OneTwentyEight = 0b111,
-} // Sample rates > 8 currently broken due to bitshift
+}
 
 // pub enum FifoStatus {
 //     Empty = 0b01,
@@ -295,17 +290,17 @@ where
     //     self.write(&[RESET, 0x80])
     // }
 
-    // fn set_pressure_shift(&mut self, value: bool) -> Result<(), E> {
-    //     let mut reg = self.read8(0x0E)? & 0b11111011;
-    //     reg |= (value as u8) << 2;
-    //     self.write(&[0x0E, reg])
-    // }
+    fn set_pressure_shift(&mut self, value: bool) -> Result<(), E> {
+        let mut reg = self.read8(CFG_REG)? & 0b11111011;
+        reg |= (value as u8) << 2;
+        self.write(&[CFG_REG, reg])
+    }
 
-    // fn set_temp_shift(&mut self, value: bool) -> Result<(), E> {
-    //     let mut reg = self.read8(0x0E)? & 0b11110111;
-    //     reg |= (value as u8) << 3;
-    //     self.write(&[0x0E, reg])
-    // }
+    fn set_temp_shift(&mut self, value: bool) -> Result<(), E> {
+        let mut reg = self.read8(CFG_REG)? & 0b11110111;
+        reg |= (value as u8) << 3;
+        self.write(&[CFG_REG, reg])
+    }
 
     /// Reset the sensor. This will reset all configuration registers to their default values.
     /// You will need to reinitialse the sensor after this.
@@ -319,36 +314,26 @@ where
     ///
     /// Note that the pressure readings are dependent on temperature readings, so the temperature
     /// oversample rate should be equal or higher than the pressure oversample rate.
-    ///
-    /// Oversampling rates higher than 8 are currently broken due to bitshift error
     pub fn set_pressure_config(
         &mut self,
         sample: SampleRate,
-        mut oversample: SampleRate,
+        oversample: SampleRate,
     ) -> Result<(), E> {
-        if oversample > SampleRate::Eight {
-            oversample = SampleRate::Eight;
-        } // FIXME: Oversampling rates higher than 8 are broken due to bitshift error
+        self.set_pressure_shift(oversample > SampleRate::Eight)?;
         let byte = (sample as u8) << 4 | oversample as u8;
-        // self.set_pressure_shift(oversample > SampleRate::Eight)?;
         self.write(&[PRS_CFG, byte])
     }
 
     /// The sample rate is the number of measurements available per second.
     /// The oversample rate is the number of individual measurements used to calculate the final
     /// value for each final measurement. Higher oversample rates will give more accurate results.
-    ///
-    /// Oversampling rates higher than 8 are currently broken due to bitshift error
     pub fn set_temperature_config(
         &mut self,
         sample: SampleRate,
-        mut oversample: SampleRate,
+        oversample: SampleRate,
     ) -> Result<(), E> {
-        if oversample > SampleRate::Eight {
-            oversample = SampleRate::Eight;
-        } // FIXME: Oversampling rates higher than 8 are broken due to bitshift error
+        self.set_temp_shift(oversample > SampleRate::Eight)?;
         let byte = 0x80 | (sample as u8) << 4 | oversample as u8;
-        // self.set_temp_shift(oversample > SampleRate::Eight)?;
         self.write(&[TMP_CFG, byte])
     }
 
@@ -562,11 +547,15 @@ mod tests {
         .chain(to_add)
         .collect::<std::vec::Vec<_>>()
     }
-
+    
     #[test]
     fn test_barometer_new_init() {
         let expectations = expectations(vec![
+            I2cTransaction::write_read(ADDR, vec![CFG_REG], vec![0]),
+            I2cTransaction::write(ADDR, vec![CFG_REG, 0]),
             I2cTransaction::write(ADDR, vec![PRS_CFG, SampleRate::Eight as u8]),
+            I2cTransaction::write_read(ADDR, vec![CFG_REG], vec![0]),
+            I2cTransaction::write(ADDR, vec![CFG_REG, 0]),
             I2cTransaction::write(ADDR, vec![TMP_CFG, 0x80 | SampleRate::Eight as u8]),
             I2cTransaction::write(
                 ADDR,
