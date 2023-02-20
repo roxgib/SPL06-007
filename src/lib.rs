@@ -297,8 +297,11 @@ where
     pub fn set_pressure_config(
         &mut self,
         sample: SampleRate,
-        oversample: SampleRate,
+        mut oversample: SampleRate,
     ) -> Result<(), E> {
+        if oversample > SampleRate::Eight {
+            oversample = SampleRate::Eight;
+        } // FIXME: Oversampling rates higher than 8 are broken due to bitshift error
         let byte = (sample as u8) << 4 | oversample as u8;
         // self.set_pressure_shift(oversample > SampleRate::Eight)?;
         self.write(&[0x06, byte])
@@ -310,8 +313,11 @@ where
     pub fn set_temperature_config(
         &mut self,
         sample: SampleRate,
-        oversample: SampleRate,
+        mut oversample: SampleRate,
     ) -> Result<(), E> {
+        if oversample > SampleRate::Eight {
+            oversample = SampleRate::Eight;
+        } // FIXME: Oversampling rates higher than 8 are broken due to bitshift error
         let byte = 0x80 | (sample as u8) << 4 | oversample as u8;
         // self.set_temp_shift(oversample > SampleRate::Eight)?;
         self.write(&[0x07, byte])
