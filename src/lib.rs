@@ -8,44 +8,28 @@
 //! sensor to default values. The sensor will then be ready to read
 //! temperature and pressure values.
 //!
-//! Example usage on an Arduino Uno:
+//! Example usage:
 //!
-//! ```rust
-//! #![no_std]
-//! #![no_main]
-//!
-//! use arduino_hal::prelude::*;
-//! use panic_halt as _;
-//!
+//! ```notest
 //! use spl06_007::Barometer;
 //!
-//! #[arduino_hal::entry]
-//! fn main() -> ! {
-//!     let dp = arduino_hal::Peripherals::take().expect("Failed to take peripherals");
-//!     let pins = arduino_hal::pins!(dp);
-//!     let mut serial = arduino_hal::default_serial!(dp, pins, 57600);
+//! let mut barometer = Barometer::new(&mut i2c).expect("Failed to instantiate barometer");
 //!
-//!     let mut i2c = arduino_hal::I2c::new(
-//!         dp.TWI,
-//!         pins.a4.into_pull_up_input(),
-//!         pins.a5.into_pull_up_input(),
-//!         50000,
-//!     );
+//! barometer.init().expect("Failed to initialise barometer");
 //!
-//!     let mut barometer = Barometer::new(&mut i2c).expect("Failed to instantiate barometer");
-//!     barometer.init().expect("Failed to initialise barometer");
-//!
-//!     loop {
-//!         ufmt::uwriteln!(&mut serial, "T: {:?}", barometer.get_temperature().unwrap() as u16).void_unwrap();
-//!         ufmt::uwriteln!(&mut serial, "P: {:?}", barometer.get_pressure().unwrap() as u16).void_unwrap();
-//!         ufmt::uwriteln!(&mut serial, "A: {:?}", barometer.altitude(1020.0).unwrap() as u16).void_unwrap();
-//!     }
-//! }
+//! let temp = barometer.get_temperature().unwrap();
+//! let pressure = barometer.get_pressure().unwrap();
+//! let altitude = barometer.altitude(1020.0).unwrap();
 //! ```
 //!
 //! It is necessary to call `init` before any other methods are called. This method will set some default values for the sensor and is suitable for most use cases. Alternatively you can set the mode, sample rate, and oversampling values manually:
 //!
-//! ```rust
+//! ```notest
+//! # use embedded_hal_mock::i2c::{Mock as I2c, Transaction as I2cTransaction};
+//! # use spl06_007::Barometer;
+//! # let mut i2c = I2c::new(&[]);
+//!
+//! # let mut barometer = Barometer::new(&mut i2c).expect("Failed to instantiate barometer");
 //! barometer.set_pressure_config(SampleRate::Single, SampleRate::Eight);
 //! barometer.set_temperature_config(SampleRate::Single, SampleRate::Eight);
 //! barometer.set_mode(Mode::ContinuousPressureTemperature);
@@ -57,6 +41,10 @@
 
 #![no_std]
 
+#[cfg(test)]
+#[macro_use]
+extern crate std;
+
 extern crate embedded_hal as hal;
 extern crate libm;
 
@@ -64,13 +52,24 @@ use embedded_hal::blocking::i2c::{Read, Write, WriteRead};
 use libm::powf;
 
 const ADDR: u8 = 0x76;
+const PRS: u8 = 0x00;
+const TMP: u8 = 0x03;
+const PRS_CFG: u8 = 0x06;
+const TMP_CFG: u8 = 0x07;
+const MEAS_CFG: u8 = 0x08;
+const CFG_REG: u8 = 0x09;
+const INT_STS: u8 = 0x0A;
+const FIFO_STS: u8 = 0x0B;
+const RESET: u8 = 0x0C;
+const ID: u8 = 0x0D;
+const COEF: u8 = 0x10;
 
 /// Use [Barometer::set_mode] to set the mode.
 ///
-/// In continuous mode, the sensor will take measurements at the rate set by 
-/// [Barometer::set_pressure_config] and [Barometer::set_temperature_config]. Note that pressure 
-/// readings are dependent on temperature readings, so it is not recommended to use continuous 
-/// mode for pressure readings because they will be calculated using out-of-date temperature 
+/// In continuous mode, the sensor will take measurements at the rate set by
+/// [Barometer::set_pressure_config] and [Barometer::set_temperature_config]. Note that pressure
+/// readings are dependent on temperature readings, so it is not recommended to use continuous
+/// mode for pressure readings because they will be calculated using out-of-date temperature
 /// readings.
 ///
 /// Temperature and Pressure modes are intended to be used when the sensor is in standby mode.
@@ -95,14 +94,13 @@ pub enum Mode {
     ContinuousPressureTemperature = 0b111,
 }
 
-
-/// Setting for the sampling and oversampling rates. 
-/// 
+/// Setting for the sampling and oversampling rates.
+///
 /// Use [Barometer::set_pressure_config] and [Barometer::set_temperature_config] to set the
 /// sampling and oversampling rates. The oversampling rate is the number of samples taken and
 /// averaged to produce a single reading. The sampling rate is the number of times per second
 /// that the sensor will record a new reading.
-/// 
+///
 /// Note that oversampling rates above 8 are currently broken due to a bitshift bug.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum SampleRate {
@@ -140,7 +138,7 @@ where
             calibration_data: CalibrationData::default(),
         };
         barometer.set_mode(Mode::Standby)?;
-        barometer.write(&[0x09, 0x00])?; // disable FIFO
+        barometer.write(&[CFG_REG, 0x00])?; // disable FIFO
         while !barometer.calibration_data_is_available()? {}
         barometer.calibration_data = barometer.get_calibration_data()?;
         Ok(barometer)
@@ -158,21 +156,21 @@ where
         self.set_pressure_config(SampleRate::One, SampleRate::Eight)?;
         self.set_temperature_config(SampleRate::One, SampleRate::Eight)?;
         self.set_mode(Mode::ContinuousPressureTemperature)?;
-        self.write(&[0x09, 0x00])?; // disable FIFO
+        self.write(&[CFG_REG, 0x00])?; // disable FIFO
         Ok(())
     }
 
     /// First four bits: Product ID
     /// Last four bits: Revision ID
     pub fn sensor_id(&mut self) -> Result<u8, E> {
-        self.read8(0x0D)
+        self.read8(ID)
     }
 
     /// Read and calculate the temperature in degrees celsius
     pub fn get_temperature(&mut self) -> Result<f32, E> {
-        let calib = self.get_calibration_data()?;
-        let temp = calib.c1 as f32 * self.traw_sc()?;
-        let offset = calib.c0 as f32 / 2.0;
+        let cal = self.calibration_data;
+        let temp = cal.c1 as f32 * self.traw_sc()?;
+        let offset = cal.c0 as f32 / 2.0;
         Ok(temp + offset)
     }
 
@@ -195,11 +193,11 @@ where
     }
 
     fn raw_pressure(&mut self) -> Result<i32, E> {
-        self.read24(0x00)
+        self.read24(PRS)
     }
 
     fn raw_temperature(&mut self) -> Result<i32, E> {
-        self.read24(0x03)
+        self.read24(TMP)
     }
 
     fn traw_sc(&mut self) -> Result<f32, E> {
@@ -221,38 +219,38 @@ where
     }
 
     fn pressure_oversample_rate(&mut self) -> Result<SampleRate, E> {
-        let byte = self.read8(0x06)?;
+        let byte = self.read8(PRS_CFG)?;
         Ok(SampleRate::from_u8(byte))
     }
 
     fn temperature_oversample_rate(&mut self) -> Result<SampleRate, E> {
-        let byte = self.read8(0x07)?;
+        let byte = self.read8(TMP_CFG)?;
         Ok(SampleRate::from_u8(byte))
     }
 
     fn calibration_data_is_available(&mut self) -> Result<bool, E> {
-        Ok((self.read8(0x08)? >> 7) == 1)
+        Ok((self.read8(MEAS_CFG)? >> 7) == 1)
     }
 
     /// Sensor data might not be available after the sensor is powered on or settings changed.
     /// Note that you should use new_data_is_available() for checking if new data is available.
     pub fn sensor_data_is_ready(&mut self) -> Result<bool, E> {
-        Ok(((self.read8(0x08)? >> 6) & 0b1) == 1)
+        Ok(((self.read8(MEAS_CFG)? >> 6) & 0b1) == 1)
     }
 
     /// Returns a tuple of (temperature, pressure), true if new data is available
     pub fn new_data_is_available(&mut self) -> Result<(bool, bool), E> {
-        let byte = self.read8(0x08)?;
+        let byte = self.read8(MEAS_CFG)?;
         Ok((((byte >> 5) & 1) == 1, ((byte >> 4) & 1) == 1))
     }
 
     // pub fn fifo_is_enabled(&mut self) -> Result<bool, E> {
-    //     let byte = self.read8(0x09)? >> 1;
+    //     let byte = self.read8(CFG_REG)? >> 1;
     //     Ok((byte & 1) == 1)
     // }
 
     // pub fn fifo_status(&mut self) -> Result<FifoStatus, E> {
-    //     match self.read8(0x0B)? & 0b11 {
+    //     match self.read8(FIFO_STS)? & 0b11 {
     //         0b01 => Ok(FifoStatus::Empty),
     //         0b00 => Ok(FifoStatus::Partial),
     //         0b10 => Ok(FifoStatus::Full),
@@ -261,13 +259,13 @@ where
     // }
 
     // pub fn set_fifo(&mut self, value: bool) -> Result<(), E> {
-    //     let mut reg = self.read8(0x09)? & 0b11111101;
+    //     let mut reg = self.read8(CFG_REG)? & 0b11111101;
     //     reg |= (value as u8) << 1;
-    //     self.write(&[0x09, reg])
+    //     self.write(&[CFG_REG, reg])
     // }
 
     // pub fn flush_fifo(&mut self) -> Result<(), E> {
-    //     self.write(&[0x0C, 0x80])
+    //     self.write(&[RESET, 0x80])
     // }
 
     // fn set_pressure_shift(&mut self, value: bool) -> Result<(), E> {
@@ -285,7 +283,7 @@ where
     /// Reset the sensor. This will reset all configuration registers to their default values.
     /// You will need to reinitialse the sensor after this.
     pub fn soft_reset(&mut self) -> Result<(), E> {
-        self.write(&[0x0C, 0x09])
+        self.write(&[RESET, 0x09])
     }
 
     /// The sample rate is the number of measurements available per second.
@@ -294,7 +292,7 @@ where
     ///
     /// Note that the pressure readings are dependent on temperature readings, so the temperature
     /// oversample rate should be equal or higher than the pressure oversample rate.
-    /// 
+    ///
     /// Oversampling rates higher than 8 are currently broken due to bitshift error
     pub fn set_pressure_config(
         &mut self,
@@ -306,13 +304,13 @@ where
         } // FIXME: Oversampling rates higher than 8 are broken due to bitshift error
         let byte = (sample as u8) << 4 | oversample as u8;
         // self.set_pressure_shift(oversample > SampleRate::Eight)?;
-        self.write(&[0x06, byte])
+        self.write(&[PRS_CFG, byte])
     }
 
     /// The sample rate is the number of measurements available per second.
     /// The oversample rate is the number of individual measurements used to calculate the final
     /// value for each final measurement. Higher oversample rates will give more accurate results.
-    /// 
+    ///
     /// Oversampling rates higher than 8 are currently broken due to bitshift error
     pub fn set_temperature_config(
         &mut self,
@@ -324,12 +322,12 @@ where
         } // FIXME: Oversampling rates higher than 8 are broken due to bitshift error
         let byte = 0x80 | (sample as u8) << 4 | oversample as u8;
         // self.set_temp_shift(oversample > SampleRate::Eight)?;
-        self.write(&[0x07, byte])
+        self.write(&[TMP_CFG, byte])
     }
 
     /// Set the mode of the sensor. See the [Mode] enum for more details.
     pub fn set_mode(&mut self, mode: Mode) -> Result<(), E> {
-        self.write(&[0x08, mode as u8])
+        self.write(&[MEAS_CFG, mode as u8])
     }
 
     /// Request a temperature reading. This function is intended to be used when the sensor is in
@@ -393,14 +391,14 @@ where
     fn get_calibration_data(&mut self) -> Result<CalibrationData, E> {
         let mut data = [0; 2];
 
-        self.read(0x10, &mut data)?;
+        self.read(COEF, &mut data)?;
         let mut c0 = ((data[0] as u16) << 4) | data[1] as u16 >> 4;
         if c0 & (1 << 11) != 0 {
             c0 |= 0xF000;
         }
 
         // c1
-        self.read(0x11, &mut data)?;
+        self.read(COEF + 1, &mut data)?;
         let mut c1 = (((data[0] & 0xF) as u16) << 8) | data[1] as u16;
         if c1 & (1 << 11) != 0 {
             c1 |= 0xF000;
@@ -408,14 +406,14 @@ where
 
         // c00
         let mut data = [0; 3];
-        self.read(0x13, &mut data)?;
+        self.read(COEF + 3, &mut data)?;
         let c00 = if data[0] & 0x80 != 0 { 0xFFF00000 } else { 0 }
             | ((data[0] as u32) << 12)
             | ((data[1] as u32) << 4)
             | ((data[2] as u32) & 0xF0) >> 4;
 
         // c10
-        self.read(0x15, &mut data)?;
+        self.read(COEF + 5, &mut data)?;
         let c10 = if data[0] & 0x8 != 0 { 0xFFF00000 } else { 0 }
             | ((data[0] as u32) & 0x0F) << 16
             | (data[1] as u32) << 8
@@ -426,11 +424,11 @@ where
             c1: c1 as i16,
             c00: c00 as i32,
             c10: c10 as i32,
-            c01: self.read16(0x8)? as i32,
-            c11: self.read16(0x10)? as i32,
-            c20: self.read16(0x12)? as i32,
-            c21: self.read16(0x14)? as i32,
-            c30: self.read16(0x16)? as i32,
+            c01: self.read16(COEF + 8)? as i32,
+            c11: self.read16(COEF + 10)? as i32,
+            c20: self.read16(COEF + 12)? as i32,
+            c21: self.read16(COEF + 14)? as i32,
+            c30: self.read16(COEF + 16)? as i32,
         })
     }
 
@@ -507,5 +505,112 @@ impl SampleRate {
             0b111 => Self::OneTwentyEight,
             _ => unreachable!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::vec::Vec;
+
+    use embedded_hal_mock::i2c::{Mock as I2cMock, Transaction as I2cTransaction};
+
+    fn expectations(to_add: Vec<I2cTransaction>) -> Vec<I2cTransaction> {
+        [
+            // Barometer::new
+            I2cTransaction::write(ADDR, vec![MEAS_CFG, 0x00]),
+            I2cTransaction::write(ADDR, vec![CFG_REG, 0x00]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0x80]),
+            I2cTransaction::write_read(ADDR, vec![COEF], vec![0, 0]),
+            I2cTransaction::write_read(ADDR, vec![COEF + 1], vec![0, 0]),
+            I2cTransaction::write_read(ADDR, vec![COEF + 3], vec![0, 0, 0]),
+            I2cTransaction::write_read(ADDR, vec![COEF + 5], vec![0, 0, 0]),
+            I2cTransaction::write_read(ADDR, vec![COEF + 8], vec![0, 0]),
+            I2cTransaction::write_read(ADDR, vec![COEF + 10], vec![0, 0]),
+            I2cTransaction::write_read(ADDR, vec![COEF + 12], vec![0, 0]),
+            I2cTransaction::write_read(ADDR, vec![COEF + 14], vec![0, 0]),
+            I2cTransaction::write_read(ADDR, vec![COEF + 16], vec![0, 0]),
+            // Barometer::init
+            I2cTransaction::write(ADDR, vec![PRS_CFG, SampleRate::Eight as u8]),
+            I2cTransaction::write(ADDR, vec![TMP_CFG, 0x80 | SampleRate::Eight as u8]),
+            I2cTransaction::write(
+                ADDR,
+                vec![MEAS_CFG, Mode::ContinuousPressureTemperature as u8],
+            ),
+            I2cTransaction::write(ADDR, vec![CFG_REG, 0x00]),
+        ]
+        .to_vec()
+        .into_iter()
+        .chain(to_add)
+        .collect::<std::vec::Vec<_>>()
+    }
+
+    #[test]
+    fn test_barometer_new_init() {
+        let expectations = expectations(vec![]);
+        let mut i2c = I2cMock::new(&expectations);
+        let mut barometer = Barometer::new(&mut i2c).unwrap();
+        barometer.init().unwrap();
+    }
+
+    #[test]
+    fn test_barometer_read() {
+        let expectations = expectations(vec![
+            I2cTransaction::write_read(ADDR, vec![0], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![0], vec![0]),
+            I2cTransaction::write_read(ADDR, vec![0], vec![0, 1]),
+            I2cTransaction::write_read(ADDR, vec![0], vec![0, 1, 2]),
+        ]);
+        let mut i2c = I2cMock::new(&expectations);
+        let mut barometer = Barometer::new(&mut i2c).unwrap();
+        barometer.init().unwrap();
+
+        let mut buffer = [0; 3];
+        barometer.read(0, &mut buffer).unwrap();
+        barometer.read8(0).unwrap();
+        barometer.read16(0).unwrap();
+        barometer.read24(0).unwrap();
+        assert_eq!(buffer, [0, 1, 2]);
+    }
+
+    #[test]
+    fn test_barometer_read_temperature() {
+        let expectations = expectations(vec![
+            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![TMP_CFG], vec![0]),
+        ]);
+        let mut i2c = I2cMock::new(&expectations);
+        let mut barometer = Barometer::new(&mut i2c).unwrap();
+        barometer.init().unwrap();
+        barometer.get_temperature().unwrap();
+    }
+
+    #[test]
+    fn test_barometer_read_pressure() {
+        let expectations = expectations(vec![
+            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![TMP_CFG], vec![0]),
+            I2cTransaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![PRS_CFG], vec![0]),
+        ]);
+        let mut i2c = I2cMock::new(&expectations);
+        let mut barometer = Barometer::new(&mut i2c).unwrap();
+        barometer.init().unwrap();
+        barometer.get_pressure().unwrap();
+    }
+
+    #[test]
+    fn test_barometer_read_altitude() {
+        let expectations = expectations(vec![
+            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![TMP_CFG], vec![0]),
+            I2cTransaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![PRS_CFG], vec![0]),
+        ]);
+        let mut i2c = I2cMock::new(&expectations);
+        let mut barometer = Barometer::new(&mut i2c).unwrap();
+        barometer.init().unwrap();
+        let altitude = barometer.altitude(1000.0).unwrap();
+        assert_eq!(altitude, 44330.0); // TODO: Insert more realistic values
     }
 }

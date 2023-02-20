@@ -11,3 +11,6 @@ categories = ["embedded", "hardware-support", "no-std", "no-std::no-alloc"]
 [dependencies]
 embedded-hal = "0.2"
 libm = "0.2"
+
+[dev-dependencies]
+embedded-hal-mock = "0.9"
