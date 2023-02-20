@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["Sam Bradshaw"]
 description = "Driver for the SPL06-007 barometric pressure sensor"
 repository = "https://github.com/roxgib/SPL06-007"
+license = "MIT"
 
 [dependencies]
 embedded-hal = "0.2"
