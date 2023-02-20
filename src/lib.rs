@@ -488,10 +488,10 @@ impl SampleRate {
             Self::Two => 1572864.0,
             Self::Four => 3670016.0,
             Self::Eight => 7864320.0,
-            // Self::Sixteen => 253952.0,
-            // Self::ThirtyTwo => 516096.0,
-            // Self::SixtyFour => 1040384.0,
-            // Self::OneTwentyEight => 2088960.0,
+            Self::Sixteen => 253952.0,
+            Self::ThirtyTwo => 516096.0,
+            Self::SixtyFour => 1040384.0,
+            Self::OneTwentyEight => 2088960.0,
         }
     }
 
@@ -501,10 +501,10 @@ impl SampleRate {
             0b001 => Self::Two,
             0b010 => Self::Four,
             0b011 => Self::Eight,
-            // 0b100 => Self::Sixteen,
-            // 0b101 => Self::ThirtyTwo,
-            // 0b110 => Self::SixtyFour,
-            // 0b111 => Self::OneTwentyEight,
+            0b100 => Self::Sixteen,
+            0b101 => Self::ThirtyTwo,
+            0b110 => Self::SixtyFour,
+            0b111 => Self::OneTwentyEight,
             _ => unreachable!(),
         }
     }
