@@ -43,11 +43,7 @@
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
 
-#![no_std]
-
-#[cfg(test)]
-#[macro_use]
-extern crate std;
+#![cfg_attr(not(test), no_std)]
 
 extern crate embedded_hal as hal;
 extern crate libm;
