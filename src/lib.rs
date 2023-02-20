@@ -39,6 +39,9 @@
 //!
 //!
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
 #![no_std]
 
 #[cfg(test)]
@@ -58,8 +61,8 @@ const PRS_CFG: u8 = 0x06;
 const TMP_CFG: u8 = 0x07;
 const MEAS_CFG: u8 = 0x08;
 const CFG_REG: u8 = 0x09;
-const INT_STS: u8 = 0x0A;
-const FIFO_STS: u8 = 0x0B;
+// const INT_STS: u8 = 0x0A;
+// const FIFO_STS: u8 = 0x0B;
 const RESET: u8 = 0x0C;
 const ID: u8 = 0x0D;
 const COEF: u8 = 0x10;
@@ -104,13 +107,29 @@ pub enum Mode {
 /// Note that oversampling rates above 8 are currently broken due to a bitshift bug.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum SampleRate {
+    /// Take a single measurement per second or single oversample per measurement.
     One = 0b000,
+    /// Two measurements per second or two oversamples per measurement. Labelled "Low Power" mode
+    /// in the datasheet.
     Two = 0b001,
+    /// Four measurements per second or four oversamples per measurement.
     Four = 0b010,
+    /// Eight measurements per second or eight oversamples per measurement. This is the default
+    /// value.
     Eight = 0b011,
+    /// Sixteen measurements per second or sixteen oversamples per measurement. Labelled "Standard"
+    ///  mode in the datasheet. Note that values above Eight are currently broken due to a bitshift
+    /// bug.
     Sixteen = 0b100,
+    /// Thirty-two measurements per second or thirty-two oversamples per measurement. Note that
+    /// values above Eight are currently broken due to a bitshift bug.
     ThirtyTwo = 0b101,
+    /// Sixty-four measurements per second or sixty-four oversamples per measurement. Labelled
+    /// "High Precision" mode in the datasheet. Note that values above Eight are currently broken
+    /// due to a bitshift bug.
     SixtyFour = 0b110,
+    /// One hundred twenty-eight measurements per second or one hundred twenty-eight oversamples
+    /// per measurement. Note that values above Eight are currently broken due to a bitshift bug.
     OneTwentyEight = 0b111,
 } // Sample rates > 8 currently broken due to bitshift
 
@@ -120,6 +139,9 @@ pub enum SampleRate {
 //     Full = 0b10,
 // }
 
+/// The SPL06-007 barometer.
+///
+/// This struct is generic over the I2C bus type. See method documentation for details.
 pub struct Barometer<'a, I2C>
 where
     I2C: Read + Write + WriteRead,
@@ -132,6 +154,12 @@ impl<'a, I2C, E> Barometer<'a, I2C>
 where
     I2C: Read<Error = E> + Write<Error = E> + WriteRead<Error = E>,
 {
+    /// Create a new instance of the barometer.
+    ///
+    /// This method will read the calibration data from the sensor and store it in the struct, so
+    /// it is important that the I2C bus is initialised before calling this method. This method
+    /// will also set the sensor to standby mode - use [Barometer::init] to initialise the sensor
+    /// to default values.
     pub fn new(i2c: &'a mut I2C) -> Result<Self, E> {
         let mut barometer = Barometer {
             i2c,
@@ -436,7 +464,7 @@ where
         self.i2c.write(ADDR, data)
     }
 
-    pub fn read(&mut self, reg: u8, buffer: &mut [u8]) -> Result<(), E> {
+    fn read(&mut self, reg: u8, buffer: &mut [u8]) -> Result<(), E> {
         self.i2c.write_read(ADDR, &[reg], buffer)
     }
 
