@@ -1,6 +1,6 @@
 [package]
 name = "spl06-007"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Sam Bradshaw"]
 description = "Driver for the SPL06-007 barometric pressure sensor"
