@@ -23,11 +23,11 @@ pub enum SampleRate {
     Two = 0b001,
     Four = 0b010,
     Eight = 0b011,
-    Sixteen = 0b100,
-    ThirtyTwo = 0b101,
-    SixtyFour = 0b110,
-    OneTwentyEight = 0b111,
-}
+    // Sixteen = 0b100,
+    // ThirtyTwo = 0b101,
+    // SixtyFour = 0b110,
+    // OneTwentyEight = 0b111,
+} // Sample rates > 8 currently broken due to bitshift
 
 // pub enum FifoStatus {
 //     Empty = 0b01,
@@ -147,10 +147,10 @@ where
         Ok(((self.read8(0x08)? >> 6) & 0b1) == 1)
     }
 
-    /// Returns a tuple of (pressure, temperature), true if new data is available
+    /// Returns a tuple of (temperature, pressure), true if new data is available
     pub fn new_data_is_available(&mut self) -> Result<(bool, bool), E> {
         let byte = self.read8(0x08)?;
-        Ok(((byte >> 5) == 1, (byte >> 4) == 1))
+        Ok((((byte >> 5) & 1) == 1, ((byte >> 4) & 1) == 1))
     }
 
     pub fn get_mode(&mut self) -> Result<Mode, E> {
@@ -204,7 +204,7 @@ where
         oversample: SampleRate,
     ) -> Result<(), E> {
         let byte = (sample as u8) << 4 | oversample as u8;
-        self.set_pressure_shift(oversample > SampleRate::Eight)?;
+        // self.set_pressure_shift(oversample > SampleRate::Eight)?;
         self.write(&[0x06, byte])
     }
 
@@ -320,10 +320,10 @@ impl SampleRate {
             Self::Two => 1572864.0,
             Self::Four => 3670016.0,
             Self::Eight => 7864320.0,
-            Self::Sixteen => 253952.0,
-            Self::ThirtyTwo => 516096.0,
-            Self::SixtyFour => 1040384.0,
-            Self::OneTwentyEight => 2088960.0,
+            // Self::Sixteen => 253952.0,
+            // Self::ThirtyTwo => 516096.0,
+            // Self::SixtyFour => 1040384.0,
+            // Self::OneTwentyEight => 2088960.0,
         }
     }
 
@@ -333,10 +333,10 @@ impl SampleRate {
             0b001 => Self::Two,
             0b010 => Self::Four,
             0b011 => Self::Eight,
-            0b100 => Self::Sixteen,
-            0b101 => Self::ThirtyTwo,
-            0b110 => Self::SixtyFour,
-            0b111 => Self::OneTwentyEight,
+            // 0b100 => Self::Sixteen,
+            // 0b101 => Self::ThirtyTwo,
+            // 0b110 => Self::SixtyFour,
+            // 0b111 => Self::OneTwentyEight,
             _ => unreachable!(),
         }
     }
