@@ -294,6 +294,8 @@ where
     ///
     /// Note that the pressure readings are dependent on temperature readings, so the temperature
     /// oversample rate should be equal or higher than the pressure oversample rate.
+    /// 
+    /// Oversampling rates higher than 8 are currently broken due to bitshift error
     pub fn set_pressure_config(
         &mut self,
         sample: SampleRate,
@@ -310,6 +312,8 @@ where
     /// The sample rate is the number of measurements available per second.
     /// The oversample rate is the number of individual measurements used to calculate the final
     /// value for each final measurement. Higher oversample rates will give more accurate results.
+    /// 
+    /// Oversampling rates higher than 8 are currently broken due to bitshift error
     pub fn set_temperature_config(
         &mut self,
         sample: SampleRate,
