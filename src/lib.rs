@@ -657,6 +657,46 @@ mod tests {
         let mut i2c = I2cMock::new(&expectations);
         let mut barometer = Barometer::new(&mut i2c).unwrap();
         let altitude = barometer.altitude(1000.0).unwrap();
-        assert_eq!(altitude, 1714.7274);
+        assert_eq!(altitude, 1714.7274); // TODO: Use more realistic values
+    }
+
+    #[test]
+    fn test_get_temperature_blocking() {
+        let expectations = expectations(vec![
+            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
+            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![TMP_CFG], vec![0]),
+        ]);
+        let mut i2c = I2cMock::new(&expectations);
+        let mut barometer = Barometer::new(&mut i2c).unwrap();
+        let temperature = barometer.get_temperature_blocking().unwrap();
+        assert_eq!(temperature, 101.372055); // TODO: Use more realistic values
+    }
+
+    #[test]
+    fn test_get_pressure_blocking() {
+        let expectations = expectations(vec![
+            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
+            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![TMP_CFG], vec![0]),
+            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Pressure as u8]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b10000]),
+            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![TMP_CFG], vec![0]),
+            I2cTransaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![PRS_CFG], vec![0]),
+        ]);
+        let mut i2c = I2cMock::new(&expectations);
+        let mut barometer = Barometer::new(&mut i2c).unwrap();
+        let pressure = barometer.get_pressure_blocking().unwrap();
+        assert_eq!(pressure, 812.77673); // TODO: Use more realistic values
     }
 }
