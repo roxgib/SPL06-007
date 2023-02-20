@@ -1,40 +1,40 @@
-//! I2C driver for the SPL06-007 pressure and temperature sensor. This sensor 
-//! is available as a breakout board for the Arduino platform. This driver 
+//! I2C driver for the SPL06-007 pressure and temperature sensor. This sensor
+//! is available as a breakout board for the Arduino platform. This driver
 //! may also work with the SPL06-001, but this has not been tested.
-//! 
+//!
 //! This sensor operates on the I2c address 0x76 and is connected to the
 //! I2C bus on the Arduino Uno. Instantiate the Barometer struct with a
 //! reference to the I2C bus and call the init() method to initialise the
 //! sensor to default values. The sensor will then be ready to read
 //! temperature and pressure values.
-//! 
+//!
 //! Example usage on an Arduino Uno:
-//! 
+//!
 //! ```rust
 //! #![no_std]
 //! #![no_main]
-//! 
+//!
 //! use arduino_hal::prelude::*;
 //! use panic_halt as _;
-//! 
+//!
 //! use spl06_007::Barometer;
-//! 
+//!
 //! #[arduino_hal::entry]
 //! fn main() -> ! {
 //!     let dp = arduino_hal::Peripherals::take().expect("Failed to take peripherals");
 //!     let pins = arduino_hal::pins!(dp);
 //!     let mut serial = arduino_hal::default_serial!(dp, pins, 57600);
-//! 
+//!
 //!     let mut i2c = arduino_hal::I2c::new(
 //!         dp.TWI,
 //!         pins.a4.into_pull_up_input(),
 //!         pins.a5.into_pull_up_input(),
 //!         50000,
 //!     );
-//! 
+//!
 //!     let mut barometer = Barometer::new(&mut i2c).expect("Failed to instantiate barometer");
 //!     barometer.init().expect("Failed to initialise barometer");
-//! 
+//!
 //!     loop {
 //!         ufmt::uwriteln!(&mut serial, "T: {:?}", barometer.get_temperature().unwrap() as u16).void_unwrap();
 //!         ufmt::uwriteln!(&mut serial, "P: {:?}", barometer.get_pressure().unwrap() as u16).void_unwrap();
@@ -42,18 +42,18 @@
 //!     }
 //! }
 //! ```
-//! 
+//!
 //! It is necessary to call `init` before any other methods are called. This method will set some default values for the sensor and is suitable for most use cases. Alternatively you can set the mode, sample rate, and oversampling values manually:
-//! 
+//!
 //! ```rust
 //! barometer.set_pressure_config(SampleRate::Single, SampleRate::Eight);
 //! barometer.set_temperature_config(SampleRate::Single, SampleRate::Eight);
 //! barometer.set_mode(Mode::ContinuousPressureTemperature);
 //! ```
-//! 
+//!
 //! This is useful if you want to change the sample rate or oversampling values, such as for more rapid updates. It is also possible to set the mode to `Mode::Standby` to reduce power consumption. Other modes, including measuring only when polled, are not well supported at this time.
-//! 
-//! 
+//!
+//!
 
 #![no_std]
 
@@ -65,25 +65,55 @@ use libm::powf;
 
 const ADDR: u8 = 0x76;
 
+/// Use [Barometer::set_mode] to set the mode.
+///
+/// In continuous mode, the sensor will take measurements at the rate set by 
+/// [Barometer::set_pressure_config] and [Barometer::set_temperature_config]. Note that pressure 
+/// readings are dependent on temperature readings, so it is not recommended to use continuous 
+/// mode for pressure readings because they will be calculated using out-of-date temperature 
+/// readings.
+///
+/// Temperature and Pressure modes are intended to be used when the sensor is in standby mode.
+/// They will take a new temperature or pressure reading, and then set the sensor to  standby
+/// mode. Setting the mode to one of these modes is equivalent to calling
+/// [Barometer::request_temperature_reading] or [Barometer::request_pressure_reading].
 pub enum Mode {
+    /// The default mode. The sensor will not take any measurements. It is still possible to read
+    /// the temperature and pressure, but the values will not be updated.
     Standby = 0b000,
+    /// Take a single temperature reading and then return to standby mode.
     Pressure = 0b001,
+    /// Take a single pressure reading and then return to standby mode.
     Temperature = 0b010,
+    /// Take continuous pressure readings at the configured sample rate. Note that this mode is
+    /// not recommended because pressure readings are dependent on temperature readings, so
+    /// they will be calculated using out-of-date temperature readings.
     ContinuousPressure = 0b101,
+    /// Take continuous temperature readings at the configured sample rate.
     ContinuousTemperature = 0b110,
+    /// Take continuous pressure and temperature readings at the configured sample rate.
     ContinuousPressureTemperature = 0b111,
 }
 
+
+/// Setting for the sampling and oversampling rates. 
+/// 
+/// Use [Barometer::set_pressure_config] and [Barometer::set_temperature_config] to set the
+/// sampling and oversampling rates. The oversampling rate is the number of samples taken and
+/// averaged to produce a single reading. The sampling rate is the number of times per second
+/// that the sensor will record a new reading.
+/// 
+/// Note that oversampling rates above 8 are currently broken due to a bitshift bug.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum SampleRate {
-    Single = 0b000,
+    One = 0b000,
     Two = 0b001,
     Four = 0b010,
     Eight = 0b011,
-    // Sixteen = 0b100,
-    // ThirtyTwo = 0b101,
-    // SixtyFour = 0b110,
-    // OneTwentyEight = 0b111,
+    Sixteen = 0b100,
+    ThirtyTwo = 0b101,
+    SixtyFour = 0b110,
+    OneTwentyEight = 0b111,
 } // Sample rates > 8 currently broken due to bitshift
 
 // pub enum FifoStatus {
@@ -125,8 +155,8 @@ where
     /// - FIFO disabled
     /// - Interrupts disabled
     pub fn init(&mut self) -> Result<(), E> {
-        self.set_pressure_config(SampleRate::Single, SampleRate::Eight)?;
-        self.set_temperature_config(SampleRate::Single, SampleRate::Eight)?;
+        self.set_pressure_config(SampleRate::One, SampleRate::Eight)?;
+        self.set_temperature_config(SampleRate::One, SampleRate::Eight)?;
         self.set_mode(Mode::ContinuousPressureTemperature)?;
         self.write(&[0x09, 0x00])?; // disable FIFO
         Ok(())
@@ -259,9 +289,9 @@ where
     }
 
     /// The sample rate is the number of measurements available per second.
-    /// The oversample rate is the number of individual measurements used to calculate the final 
+    /// The oversample rate is the number of individual measurements used to calculate the final
     /// value for each final measurement. Higher oversample rates will give more accurate results.
-    /// 
+    ///
     /// Note that the pressure readings are dependent on temperature readings, so the temperature
     /// oversample rate should be equal or higher than the pressure oversample rate.
     pub fn set_pressure_config(
@@ -275,7 +305,7 @@ where
     }
 
     /// The sample rate is the number of measurements available per second.
-    /// The oversample rate is the number of individual measurements used to calculate the final 
+    /// The oversample rate is the number of individual measurements used to calculate the final
     /// value for each final measurement. Higher oversample rates will give more accurate results.
     pub fn set_temperature_config(
         &mut self,
@@ -287,8 +317,67 @@ where
         self.write(&[0x07, byte])
     }
 
+    /// Set the mode of the sensor. See the [Mode] enum for more details.
     pub fn set_mode(&mut self, mode: Mode) -> Result<(), E> {
         self.write(&[0x08, mode as u8])
+    }
+
+    /// Request a temperature reading. This function is intended to be used when the sensor is in
+    /// standby mode. It will take a new temperature reading, and then return to standby mode. If
+    /// the sensor is in continuous mode, this function leaves the sensor in standby mode.
+    ///
+    /// This will not block until the reading is complete. You can check if the reading is
+    /// complete using `new_data_is_available()`. You can then read the temperature using
+    /// `get_temperature()`.
+    pub fn request_temperature_reading(&mut self) -> Result<(), E> {
+        self.set_mode(Mode::Temperature)
+    }
+
+    /// Request a pressure reading. This function is intended to be used when the sensor is in
+    /// standby mode. It will take a new temperature reading, and then return to standby mode. If
+    /// the sensor is in continuous mode, this function leaves the sensor in standby mode.
+    ///
+    /// This will not block until the reading is complete. You can check if the reading is
+    /// complete using `new_data_is_available()`. You can then read the temperature using
+    /// `get_pressure()`.
+    ///
+    /// Because the pressure reading is dependent on the temperature reading, it is recommended
+    /// that you request a temperature reading first, and then a pressure reading. This will
+    /// ensure that the temperature reading is recent. If you have recently requested a temperature
+    /// reading and do not expect the temperature to have changed significantly, you can skip the
+    /// temperature reading.
+    pub fn request_pressure_reading(&mut self) -> Result<(), E> {
+        self.set_mode(Mode::Pressure)
+    }
+
+    /// Request a temperature reading. This function is intended to be used when the sensor is in
+    /// standby mode. It will take a new temperature reading, and then return to standby mode. If
+    /// the sensor is in continuous mode, this function leaves the sensor in standby mode.
+    ///
+    /// This will block until the reading is complete, and then return the result.
+    pub fn get_temperature_blocking(&mut self) -> Result<f32, E> {
+        self.request_temperature_reading()?;
+        while !self.new_data_is_available()?.0 {
+            // wait
+        }
+        self.get_temperature()
+    }
+
+    /// Request a pressure reading. This function is intended to be used when the sensor is in
+    /// standby mode. It will take a new temperature reading, and then return to standby mode. If
+    /// the sensor is in continuous mode, this function leaves the sensor in standby mode.
+    ///
+    /// Unlike request_pressure_reading(), this function will also request a temperature reading
+    /// first, so there is no need to do this manually.
+    ///
+    /// This function will block until the reading is complete, and then return the result.
+    pub fn get_pressure_blocking(&mut self) -> Result<f32, E> {
+        self.get_temperature_blocking()?;
+        self.request_pressure_reading()?;
+        while !self.new_data_is_available()?.1 {
+            // wait
+        }
+        self.get_pressure()
     }
 
     fn get_calibration_data(&mut self) -> Result<CalibrationData, E> {
@@ -385,7 +474,7 @@ struct CalibrationData {
 impl SampleRate {
     fn scale_factor(&self) -> f32 {
         match self {
-            Self::Single => 524288.0,
+            Self::One => 524288.0,
             Self::Two => 1572864.0,
             Self::Four => 3670016.0,
             Self::Eight => 7864320.0,
@@ -398,7 +487,7 @@ impl SampleRate {
 
     fn from_u8(value: u8) -> SampleRate {
         match value & 0b111 {
-            0b000 => Self::Single,
+            0b000 => Self::One,
             0b001 => Self::Two,
             0b010 => Self::Four,
             0b011 => Self::Eight,
