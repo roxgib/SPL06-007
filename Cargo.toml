@@ -9,4 +9,4 @@ license = "MIT"
 
 [dependencies]
 embedded-hal = "0.2"
-libm = "*"
+libm = "0.2"
