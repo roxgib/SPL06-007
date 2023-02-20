@@ -8,7 +8,7 @@ Add the following to your Cargo.toml:
 
 ```toml
 [dependencies]
-spl06_007 = "0.1"
+spl06_007 = "0.2"
 ```
 
 Example usage on an Arduino Uno:
