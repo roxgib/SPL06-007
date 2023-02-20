@@ -1,3 +1,60 @@
+//! I2C driver for the SPL06-007 pressure and temperature sensor. This sensor 
+//! is available as a breakout board for the Arduino platform. This driver 
+//! may also work with the SPL06-001, but this has not been tested.
+//! 
+//! This sensor operates on the I2c address 0x76 and is connected to the
+//! I2C bus on the Arduino Uno. Instantiate the Barometer struct with a
+//! reference to the I2C bus and call the init() method to initialise the
+//! sensor to default values. The sensor will then be ready to read
+//! temperature and pressure values.
+//! 
+//! Example usage on an Arduino Uno:
+//! 
+//! ```rust
+//! #![no_std]
+//! #![no_main]
+//! 
+//! use arduino_hal::prelude::*;
+//! use panic_halt as _;
+//! 
+//! use spl06_007::Barometer;
+//! 
+//! #[arduino_hal::entry]
+//! fn main() -> ! {
+//!     let dp = arduino_hal::Peripherals::take().expect("Failed to take peripherals");
+//!     let pins = arduino_hal::pins!(dp);
+//!     let mut serial = arduino_hal::default_serial!(dp, pins, 57600);
+//! 
+//!     let mut i2c = arduino_hal::I2c::new(
+//!         dp.TWI,
+//!         pins.a4.into_pull_up_input(),
+//!         pins.a5.into_pull_up_input(),
+//!         50000,
+//!     );
+//! 
+//!     let mut barometer = Barometer::new(&mut i2c).expect("Failed to instantiate barometer");
+//!     barometer.init().expect("Failed to initialise barometer");
+//! 
+//!     loop {
+//!         ufmt::uwriteln!(&mut serial, "T: {:?}", barometer.get_temperature().unwrap() as u16).void_unwrap();
+//!         ufmt::uwriteln!(&mut serial, "P: {:?}", barometer.get_pressure().unwrap() as u16).void_unwrap();
+//!         ufmt::uwriteln!(&mut serial, "A: {:?}", barometer.altitude(1020.0).unwrap() as u16).void_unwrap();
+//!     }
+//! }
+//! ```
+//! 
+//! It is necessary to call `init` before any other methods are called. This method will set some default values for the sensor and is suitable for most use cases. Alternatively you can set the mode, sample rate, and oversampling values manually:
+//! 
+//! ```rust
+//! barometer.set_pressure_config(SampleRate::Single, SampleRate::Eight);
+//! barometer.set_temperature_config(SampleRate::Single, SampleRate::Eight);
+//! barometer.set_mode(Mode::ContinuousPressureTemperature);
+//! ```
+//! 
+//! This is useful if you want to change the sample rate or oversampling values, such as for more rapid updates. It is also possible to set the mode to `Mode::Standby` to reduce power consumption. Other modes, including measuring only when polled, are not well supported at this time.
+//! 
+//! 
+
 #![no_std]
 
 extern crate embedded_hal as hal;
@@ -59,7 +116,15 @@ where
         Ok(barometer)
     }
 
-    pub fn initialise(&mut self) -> Result<(), E> {
+    /// Initialise the sensor to default values:
+    /// - Pressure sample rate: 1
+    /// - Pressure oversample rate: 8
+    /// - Temperature oversample rate: 1
+    /// - Temperature sample rate: 8
+    /// - Mode: Continuous pressure and temperature
+    /// - FIFO disabled
+    /// - Interrupts disabled
+    pub fn init(&mut self) -> Result<(), E> {
         self.set_pressure_config(SampleRate::Single, SampleRate::Eight)?;
         self.set_temperature_config(SampleRate::Single, SampleRate::Eight)?;
         self.set_mode(Mode::ContinuousPressureTemperature)?;
@@ -67,6 +132,8 @@ where
         Ok(())
     }
 
+    /// First four bits: Product ID
+    /// Last four bits: Revision ID
     pub fn sensor_id(&mut self) -> Result<u8, E> {
         self.read8(0x0D)
     }
@@ -123,18 +190,12 @@ where
         Ok(pressure as f32 / oversample_rate.scale_factor())
     }
 
-    pub fn pressure_oversample_rate(&mut self) -> Result<SampleRate, E> {
+    fn pressure_oversample_rate(&mut self) -> Result<SampleRate, E> {
         let byte = self.read8(0x06)?;
         Ok(SampleRate::from_u8(byte))
     }
 
-    pub fn pressure_sample_rate(&mut self) -> Result<u8, E> {
-        let byte = self.read8(0x06)? >> 4;
-
-        Ok(byte & 0b111)
-    }
-
-    pub fn temperature_oversample_rate(&mut self) -> Result<SampleRate, E> {
+    fn temperature_oversample_rate(&mut self) -> Result<SampleRate, E> {
         let byte = self.read8(0x07)?;
         Ok(SampleRate::from_u8(byte))
     }
@@ -143,6 +204,8 @@ where
         Ok((self.read8(0x08)? >> 7) == 1)
     }
 
+    /// Sensor data might not be available after the sensor is powered on or settings changed.
+    /// Note that you should use new_data_is_available() for checking if new data is available.
     pub fn sensor_data_is_ready(&mut self) -> Result<bool, E> {
         Ok(((self.read8(0x08)? >> 6) & 0b1) == 1)
     }
@@ -151,10 +214,6 @@ where
     pub fn new_data_is_available(&mut self) -> Result<(bool, bool), E> {
         let byte = self.read8(0x08)?;
         Ok((((byte >> 5) & 1) == 1, ((byte >> 4) & 1) == 1))
-    }
-
-    pub fn get_mode(&mut self) -> Result<Mode, E> {
-        Ok(Mode::from_u8(self.read8(0x08)?))
     }
 
     // pub fn fifo_is_enabled(&mut self) -> Result<bool, E> {
@@ -181,23 +240,30 @@ where
     //     self.write(&[0x0C, 0x80])
     // }
 
-    fn set_pressure_shift(&mut self, value: bool) -> Result<(), E> {
-        let mut reg = self.read8(0x0E)? & 0b11111011;
-        reg |= (value as u8) << 2;
-        self.write(&[0x0E, reg])
-    }
+    // fn set_pressure_shift(&mut self, value: bool) -> Result<(), E> {
+    //     let mut reg = self.read8(0x0E)? & 0b11111011;
+    //     reg |= (value as u8) << 2;
+    //     self.write(&[0x0E, reg])
+    // }
 
-    fn set_temp_shift(&mut self, value: bool) -> Result<(), E> {
-        let mut reg = self.read8(0x0E)? & 0b11110111;
-        reg |= (value as u8) << 3;
-        self.write(&[0x0E, reg])
-    }
+    // fn set_temp_shift(&mut self, value: bool) -> Result<(), E> {
+    //     let mut reg = self.read8(0x0E)? & 0b11110111;
+    //     reg |= (value as u8) << 3;
+    //     self.write(&[0x0E, reg])
+    // }
 
     /// Reset the sensor. This will reset all configuration registers to their default values.
+    /// You will need to reinitialse the sensor after this.
     pub fn soft_reset(&mut self) -> Result<(), E> {
         self.write(&[0x0C, 0x09])
     }
 
+    /// The sample rate is the number of measurements available per second.
+    /// The oversample rate is the number of individual measurements used to calculate the final 
+    /// value for each final measurement. Higher oversample rates will give more accurate results.
+    /// 
+    /// Note that the pressure readings are dependent on temperature readings, so the temperature
+    /// oversample rate should be equal or higher than the pressure oversample rate.
     pub fn set_pressure_config(
         &mut self,
         sample: SampleRate,
@@ -208,13 +274,16 @@ where
         self.write(&[0x06, byte])
     }
 
+    /// The sample rate is the number of measurements available per second.
+    /// The oversample rate is the number of individual measurements used to calculate the final 
+    /// value for each final measurement. Higher oversample rates will give more accurate results.
     pub fn set_temperature_config(
         &mut self,
         sample: SampleRate,
         oversample: SampleRate,
     ) -> Result<(), E> {
         let byte = 0x80 | (sample as u8) << 4 | oversample as u8;
-        self.set_temp_shift(oversample > SampleRate::Eight)?;
+        // self.set_temp_shift(oversample > SampleRate::Eight)?;
         self.write(&[0x07, byte])
     }
 
@@ -314,7 +383,7 @@ struct CalibrationData {
 }
 
 impl SampleRate {
-    pub fn scale_factor(&self) -> f32 {
+    fn scale_factor(&self) -> f32 {
         match self {
             Self::Single => 524288.0,
             Self::Two => 1572864.0,
@@ -327,7 +396,7 @@ impl SampleRate {
         }
     }
 
-    pub fn from_u8(value: u8) -> SampleRate {
+    fn from_u8(value: u8) -> SampleRate {
         match value & 0b111 {
             0b000 => Self::Single,
             0b001 => Self::Two,
@@ -343,7 +412,7 @@ impl SampleRate {
 }
 
 impl Mode {
-    pub fn from_u8(value: u8) -> Mode {
+    fn from_u8(value: u8) -> Mode {
         match value & 0b111 {
             0b000 => Mode::Standby,
             0b001 => Mode::Pressure,
