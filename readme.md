@@ -1,3 +1,7 @@
+[![Crates.io Version][crates-io-badge]][crates-io]
+[![Crates.io Downloads][crates-io-download-badge]][crates-io-download]
+![No Std][no-std-badge]
+
 An I2C driver for the SPL06-007 barometric pressure and temperature sensor, intended for use in embedded environments.
 
 ## Usage
@@ -56,3 +60,9 @@ barometer.set_mode(Mode::ContinuousPressureTemperature);
 
 This is useful if you want to change the sample rate or oversampling values, such as for more rapid updates. It is also possible to set the mode to `Mode::Standby` to reduce power consumption. Other modes, including measuring only when polled, are not well supported at this time.
 
+<!-- Badges -->
+[crates-io]: https://crates.io/crates/spl06-007
+[crates-io-badge]: https://img.shields.io/crates/v/spl06-007.svg?maxAge=3600
+[crates-io-download]: https://crates.io/crates/spl06-007
+[crates-io-download-badge]: https://img.shields.io/crates/d/spl06-007.svg?maxAge=3600
+[no-std-badge]: https://img.shields.io/badge/no__std-yes-blue
