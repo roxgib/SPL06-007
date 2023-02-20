@@ -410,17 +410,3 @@ impl SampleRate {
         }
     }
 }
-
-impl Mode {
-    fn from_u8(value: u8) -> Mode {
-        match value & 0b111 {
-            0b000 => Mode::Standby,
-            0b001 => Mode::Pressure,
-            0b010 => Mode::Temperature,
-            0b101 => Mode::ContinuousPressure,
-            0b110 => Mode::ContinuousTemperature,
-            0b111 => Mode::ContinuousPressureTemperature,
-            _ => unreachable!(),
-        }
-    }
-}
