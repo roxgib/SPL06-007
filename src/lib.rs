@@ -4,40 +4,32 @@
 //!
 //! This sensor operates on the I2c address 0x76 and is connected to the
 //! I2C bus on the Arduino Uno. Instantiate the Barometer struct with a
-//! reference to the I2C bus and call the init() method to initialise the
-//! sensor to default values. The sensor will then be ready to read
+//! reference to the I2C bus. The sensor will then be ready to read
 //! temperature and pressure values.
 //!
-//! Example usage:
-//!
-//! ```notest
-//! use spl06_007::Barometer;
+//! ```rust, ignore
+//! use spl06_007::*;
 //!
 //! let mut barometer = Barometer::new(&mut i2c).expect("Failed to instantiate barometer");
-//!
-//! barometer.init().expect("Failed to initialise barometer");
-//!
 //! let temp = barometer.get_temperature().unwrap();
 //! let pressure = barometer.get_pressure().unwrap();
 //! let altitude = barometer.altitude(1020.0).unwrap();
 //! ```
 //!
-//! It is necessary to call `init` before any other methods are called. This method will set some default values for the sensor and is suitable for most use cases. Alternatively you can set the mode, sample rate, and oversampling values manually:
+//! You can set the mode, sample rate, and oversampling values manually:
 //!
-//! ```notest
-//! # use embedded_hal_mock::i2c::{Mock as I2c, Transaction as I2cTransaction};
-//! # use spl06_007::Barometer;
-//! # let mut i2c = I2c::new(&[]);
-//!
-//! # let mut barometer = Barometer::new(&mut i2c).expect("Failed to instantiate barometer");
+//! ```rust, ignore
 //! barometer.set_pressure_config(SampleRate::Single, SampleRate::Eight);
 //! barometer.set_temperature_config(SampleRate::Single, SampleRate::Eight);
-//! barometer.set_mode(Mode::ContinuousPressureTemperature);
 //! ```
 //!
-//! This is useful if you want to change the sample rate or oversampling values, such as for more rapid updates. It is also possible to set the mode to `Mode::Standby` to reduce power consumption. Other modes, including measuring only when polled, are not well supported at this time.
-//!
-//!
+//! This is useful for more rapid updates, better precsion, or lower power draw. 
+//! 
+//! It is also possible to set the mode to `Mode::Standby` to reduce power consumption.: 
+//! 
+//! ```rust, ignore
+//! barometer.set_mode(Mode::Standby);
+//! ```
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
