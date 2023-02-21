@@ -48,7 +48,6 @@ extern crate embedded_hal as hal;
 extern crate libm;
 
 use embedded_hal::blocking::i2c::{Read, Write, WriteRead};
-use libm::powf;
 
 const ADDR: u8 = 0x76;
 const PRS: u8 = 0x00;
@@ -71,10 +70,9 @@ const COEF: u8 = 0x10;
 /// mode for pressure readings because they will be calculated using out-of-date temperature
 /// readings.
 ///
-/// Temperature and Pressure modes are intended to be used when the sensor is in standby mode.
-/// They will take a new temperature or pressure reading, and then set the sensor to  standby
-/// mode. Setting the mode to one of these modes is equivalent to calling
-/// [Barometer::request_temperature_reading] or [Barometer::request_pressure_reading].
+/// Temperature and Pressure modes will take a single measurement and then return to standby
+/// mode. These are used internally by the [Barometer::get_temperature] and [Barometer::get_pressure]
+/// methods and are not recommended for general use.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     /// The default mode. The sensor will not take any measurements. It is still possible to read
@@ -143,6 +141,7 @@ where
     calibration_data: CalibrationData,
     temperature_oversample: SampleRate,
     pressure_oversample: SampleRate,
+    mode: Mode,
 }
 
 impl<'a, I2C, E> Barometer<'a, I2C>
@@ -151,25 +150,7 @@ where
 {
     /// Create a new instance of the barometer.
     ///
-    /// This method will read the calibration data from the sensor and store it in the struct, so
-    /// it is important that the I2C bus is initialised before calling this method. This method
-    /// will also set the sensor to standby mode - use [Barometer::init] to initialise the sensor
-    /// to default values.
-    pub fn new(i2c: &'a mut I2C) -> Result<Self, E> {
-        let mut barometer = Barometer {
-            i2c,
-            calibration_data: CalibrationData::default(),
-            temperature_oversample: SampleRate::Eight,
-            pressure_oversample: SampleRate::Eight,
-        };
-        barometer.set_mode(Mode::Standby)?;
-        barometer.write(&[CFG_REG, 0x00])?; // disable FIFO
-        while !barometer.calibration_data_is_available()? {}
-        barometer.calibration_data = barometer.get_calibration_data()?;
-        Ok(barometer)
-    }
-
-    /// Initialise the sensor to default values:
+    /// This method will initialise the sensor with the following default settings:
     /// - Pressure sample rate: 1
     /// - Pressure oversample rate: 8
     /// - Temperature oversample rate: 1
@@ -177,7 +158,21 @@ where
     /// - Mode: Continuous pressure and temperature
     /// - FIFO disabled
     /// - Interrupts disabled
-    pub fn init(&mut self) -> Result<(), E> {
+    pub fn new(i2c: &'a mut I2C) -> Result<Self, E> {
+        let mut barometer = Barometer {
+            i2c,
+            calibration_data: CalibrationData::default(),
+            temperature_oversample: SampleRate::Eight,
+            pressure_oversample: SampleRate::Eight,
+            mode: Mode::Standby,
+        };
+        while (barometer.read8(MEAS_CFG)? >> 7) != 1 {}
+        barometer.calibration_data = barometer.get_calibration_data()?;
+        barometer.init()?;
+        Ok(barometer)
+    }
+
+    fn init(&mut self) -> Result<(), E> {
         self.set_pressure_config(SampleRate::One, SampleRate::Eight)?;
         self.set_temperature_config(SampleRate::One, SampleRate::Eight)?;
         self.set_mode(Mode::ContinuousPressureTemperature)?;
@@ -191,16 +186,38 @@ where
         self.read8(ID)
     }
 
-    /// Read and calculate the temperature in degrees celsius
+    /// Read and calculate the temperature in degrees celsius.
+    ///
+    /// When the sensor is in standby mode or continuous pressure mode, this method will block
+    /// until a new temperature reading is available. When the sensor is in continuous temperature
+    /// mode, this method will return the latest temperature reading. In continuous mode you can
+    /// check if a new temperature reading is available using [Barometer::new_data_is_available].
     pub fn get_temperature(&mut self) -> Result<f32, E> {
+        if self.mode == Mode::Standby || self.mode == Mode::ContinuousPressure {
+            while !self.new_data_is_available()?.0 {
+                self.set_mode(Mode::Temperature)?
+            }
+        }
         let cal = self.calibration_data;
-        let temp = cal.c1 as f32 * self.traw_sc()?;
-        let offset = cal.c0 as f32 / 2.0;
-        Ok(temp + offset)
+        Ok(cal.c0 as f32 / 2.0 + cal.c1 as f32 * self.traw_sc()?)
     }
 
     /// Read and calculate the pressure in millibars
+    ///
+    /// When the sensor is in standby mode or continuous temperature mode, this method will block
+    /// until a new temperature reading is available. When the sensor is in continuous pressure
+    /// mode, this method will return the latest pressure reading. In continuous mode you can
+    /// check if a new temperature reading is available using [Barometer::new_data_is_available].
     pub fn get_pressure(&mut self) -> Result<f32, E> {
+        if self.mode == Mode::Standby {
+            self.get_temperature()?;
+        }
+        if self.mode == Mode::Standby || self.mode == Mode::ContinuousTemperature {
+            while !self.new_data_is_available()?.1 {
+                self.set_mode(Mode::Pressure)?
+            }
+        }
+
         let cal = self.calibration_data;
         let traw_sc = self.traw_sc()?;
         let praw_sc = self.praw_sc()?;
@@ -214,19 +231,11 @@ where
 
     /// Read and calculate the altitude in metres
     pub fn altitude(&mut self, sea_level_hpa: f32) -> Result<f32, E> {
-        Ok(44330.0 * (1.0 - powf(self.get_pressure()? / sea_level_hpa, 0.1903)))
-    }
-
-    fn raw_pressure(&mut self) -> Result<i32, E> {
-        self.read24(PRS)
-    }
-
-    fn raw_temperature(&mut self) -> Result<i32, E> {
-        self.read24(TMP)
+        Ok(44330.0 * (1.0 - libm::powf(self.get_pressure()? / sea_level_hpa, 0.1903)))
     }
 
     fn traw_sc(&mut self) -> Result<f32, E> {
-        let mut temp = self.raw_temperature()?;
+        let mut temp = self.read24(TMP)?;
         if self.temperature_oversample > SampleRate::Eight {
             temp <<= 1;
         }
@@ -234,15 +243,11 @@ where
     }
 
     fn praw_sc(&mut self) -> Result<f32, E> {
-        let mut pressure = self.raw_pressure()?;
+        let mut pressure = self.read24(PRS)?;
         if self.pressure_oversample > SampleRate::Eight {
             pressure <<= 1;
         }
         Ok(pressure as f32 / self.pressure_oversample.scale_factor())
-    }
-
-    fn calibration_data_is_available(&mut self) -> Result<bool, E> {
-        Ok((self.read8(MEAS_CFG)? >> 7) == 1)
     }
 
     /// Sensor data might not be available after the sensor is powered on or settings changed.
@@ -294,9 +299,9 @@ where
     }
 
     /// Reset the sensor. This will reset all configuration registers to their default values.
-    /// You will need to reinitialse the sensor after this.
     pub fn soft_reset(&mut self) -> Result<(), E> {
-        self.write(&[RESET, 0x09])
+        self.write(&[RESET, 0x09])?;
+        self.init()
     }
 
     /// The sample rate is the number of measurements available per second.
@@ -332,71 +337,11 @@ where
 
     /// Set the mode of the sensor. See the [Mode] enum for more details.
     pub fn set_mode(&mut self, mode: Mode) -> Result<(), E> {
+        self.mode = match mode {
+            Mode::Standby | Mode::Pressure | Mode::Temperature => Mode::Standby,
+            _ => mode,
+        };
         self.write(&[MEAS_CFG, mode as u8])
-    }
-
-    /// Request a temperature reading. This function is intended to be used when the sensor is in
-    /// standby mode. It will take a new temperature reading, and then return to standby mode. If
-    /// the sensor is in continuous mode, this function leaves the sensor in standby mode.
-    ///
-    /// This will not block until the reading is complete. You can check if the reading is
-    /// complete using [Barometer::new_data_is_available]. You can then read the temperature using
-    /// [Barometer::get_temperature].
-    /// 
-    /// For a more straightforward interface when in standby mode, see [Barometer::get_temperature_blocking].
-    pub fn request_temperature_reading(&mut self) -> Result<(), E> {
-        self.set_mode(Mode::Temperature)
-    }
-
-    /// Request a pressure reading. This function is intended to be used when the sensor is in
-    /// standby mode. It will take a new temperature reading, and then return to standby mode. If
-    /// the sensor is in continuous mode, this function leaves the sensor in standby mode.
-    ///
-    /// This will not block until the reading is complete. You can check if the reading is
-    /// complete using [Barometer::new_data_is_available]. You can then read the pressure using
-    /// [Barometer::get_pressure].
-    ///
-    /// Because the pressure reading is dependent on the temperature reading, it is recommended
-    /// that you request a temperature reading first, and then a pressure reading. This will
-    /// ensure that the temperature reading is recent. If you have recently requested a temperature
-    /// reading and do not expect the temperature to have changed significantly, you can skip the
-    /// temperature reading.
-    /// 
-    /// For a more straightforward interface when in standby mode, see [Barometer::get_pressure_blocking].
-    pub fn request_pressure_reading(&mut self) -> Result<(), E> {
-        self.set_mode(Mode::Pressure)
-    }
-
-    /// Request a temperature reading. This function is intended to be used when the sensor is in
-    /// standby mode. It will take a new temperature reading, and then return to standby mode. If
-    /// the sensor is in continuous mode, this function leaves the sensor in standby mode.
-    ///
-    /// This will block until the reading is complete, and then return the result.
-    pub fn get_temperature_blocking(&mut self) -> Result<f32, E> {
-        self.request_temperature_reading()?;
-        while !self.new_data_is_available()?.0 {
-            // wait
-        }
-        self.get_temperature()
-    }
-
-    /// Request a pressure reading. This function is intended to be used when the sensor is in
-    /// standby mode. It will take a new temperature reading, and then return to standby mode. If
-    /// the sensor is in continuous mode, this function leaves the sensor in standby mode.
-    ///
-    /// Unlike [Barometer::request_pressure_reading], this function will also request a temperature reading
-    /// first, so there is no need to do this manually. If you want both a temperature and pressure
-    /// reading, it is recommended that you use this function first and then call [Barometer::get_temperature]
-    /// to get the saved temperature reading rather than requesting a new one with [Barometer::get_temperature_blocking].
-    ///
-    /// This function will block until the reading is complete, and then return the result.
-    pub fn get_pressure_blocking(&mut self) -> Result<f32, E> {
-        self.get_temperature_blocking()?;
-        self.request_pressure_reading()?;
-        while !self.new_data_is_available()?.1 {
-            // wait
-        }
-        self.get_pressure()
     }
 
     fn get_calibration_data(&mut self) -> Result<CalibrationData, E> {
@@ -514,8 +459,6 @@ mod tests {
     fn expectations(to_add: Vec<I2cTransaction>) -> Vec<I2cTransaction> {
         [
             // Barometer::new
-            I2cTransaction::write(ADDR, vec![MEAS_CFG, 0x00]),
-            I2cTransaction::write(ADDR, vec![CFG_REG, 0x00]),
             I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0x80]),
             I2cTransaction::write_read(ADDR, vec![COEF], vec![0xc, 0xbe]),
             I2cTransaction::write_read(ADDR, vec![COEF + 1], vec![0xbe, 0xfc]),
@@ -526,16 +469,6 @@ mod tests {
             I2cTransaction::write_read(ADDR, vec![COEF + 12], vec![0xda, 0x5a]),
             I2cTransaction::write_read(ADDR, vec![COEF + 14], vec![0x0, 0xa]),
             I2cTransaction::write_read(ADDR, vec![COEF + 16], vec![0xfb, 0x1b]),
-        ]
-        .to_vec()
-        .into_iter()
-        .chain(to_add)
-        .collect::<std::vec::Vec<_>>()
-    }
-
-    #[test]
-    fn test_barometer_new_init() {
-        let expectations = expectations(vec![
             I2cTransaction::write_read(ADDR, vec![CFG_REG], vec![0]),
             I2cTransaction::write(ADDR, vec![CFG_REG, 0]),
             I2cTransaction::write(ADDR, vec![PRS_CFG, SampleRate::Eight as u8]),
@@ -547,10 +480,18 @@ mod tests {
                 vec![MEAS_CFG, Mode::ContinuousPressureTemperature as u8],
             ),
             I2cTransaction::write(ADDR, vec![CFG_REG, 0x00]),
-        ]);
+        ]
+        .to_vec()
+        .into_iter()
+        .chain(to_add)
+        .collect::<std::vec::Vec<_>>()
+    }
+
+    #[test]
+    fn test_barometer_new_init() {
+        let expectations = expectations(vec![]);
         let mut i2c = I2cMock::new(&expectations);
-        let mut barometer = Barometer::new(&mut i2c).unwrap();
-        barometer.init().unwrap();
+        Barometer::new(&mut i2c).unwrap();
     }
 
     #[test]
@@ -581,12 +522,10 @@ mod tests {
             calibration_data: CalibrationData::default(),
             temperature_oversample: SampleRate::Eight,
             pressure_oversample: SampleRate::Eight,
-
+            mode: Mode::Standby,
         };
         // remainder of new
-        barometer.set_mode(Mode::Standby).unwrap();
-        barometer.write(&[CFG_REG, 0x00]).unwrap(); // disable FIFO
-        barometer.calibration_data_is_available().unwrap();
+        barometer.read8(MEAS_CFG).unwrap();
         let cal_data = barometer.get_calibration_data().unwrap();
         assert_eq!(cal_data.c0, 203, "c0");
         assert_eq!(cal_data.c1, -260, "c1");
@@ -600,71 +539,61 @@ mod tests {
     }
 
     #[test]
-    fn test_barometer_read_temperature() {
+    fn test_barometer_get_temperature() {
         let expectations = expectations(vec![
+            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
             I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
         ]);
         let mut i2c = I2cMock::new(&expectations);
         let mut barometer = Barometer::new(&mut i2c).unwrap();
-        barometer.get_temperature().unwrap();
+        barometer.mode = Mode::ContinuousPressureTemperature;
+        barometer.get_temperature().unwrap(); // TODO: test value
+        barometer.mode = Mode::Standby;
+        barometer.get_temperature().unwrap(); // TODO: test value
     }
 
     #[test]
-    fn test_barometer_read_pressure() {
+    fn test_barometer_get_pressure() {
+        let expectations = expectations(vec![
+            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
+            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Pressure as u8]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
+            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Pressure as u8]),
+            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b010000]),
+            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            I2cTransaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
+        ]);
+        let mut i2c = I2cMock::new(&expectations);
+        let mut barometer = Barometer::new(&mut i2c).unwrap();
+        barometer.mode = Mode::ContinuousPressureTemperature;
+        barometer.get_pressure().unwrap(); // TODO: test value
+        barometer.mode = Mode::Standby;
+        barometer.get_pressure().unwrap(); // TODO: test value
+    }
+
+    #[test]
+    fn test_barometer_altitude() {
         let expectations = expectations(vec![
             I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
             I2cTransaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
         ]);
         let mut i2c = I2cMock::new(&expectations);
         let mut barometer = Barometer::new(&mut i2c).unwrap();
-        barometer.get_pressure().unwrap();
-    }
-
-    #[test]
-    fn test_barometer_read_altitude() {
-        let expectations = expectations(vec![
-            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
-            I2cTransaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
-        ]);
-        let mut i2c = I2cMock::new(&expectations);
-        let mut barometer = Barometer::new(&mut i2c).unwrap();
+        barometer.mode = Mode::ContinuousPressureTemperature;
         let altitude = barometer.altitude(1000.0).unwrap();
         assert_eq!(altitude, 1712.0905); // TODO: Use more realistic values
-    }
-
-    #[test]
-    fn test_get_temperature_blocking() {
-        let expectations = expectations(vec![
-            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
-            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
-        ]);
-        let mut i2c = I2cMock::new(&expectations);
-        let mut barometer = Barometer::new(&mut i2c).unwrap();
-        let temperature = barometer.get_temperature_blocking().unwrap();
-        assert_eq!(temperature, 101.49147); // TODO: Use more realistic values
-    }
-
-    #[test]
-    fn test_get_pressure_blocking() {
-        let expectations = expectations(vec![
-            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
-            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
-            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Pressure as u8]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b10000]),
-            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
-            I2cTransaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
-        ]);
-        let mut i2c = I2cMock::new(&expectations);
-        let mut barometer = Barometer::new(&mut i2c).unwrap();
-        let pressure = barometer.get_pressure_blocking().unwrap();
-        assert_eq!(pressure, 813.0411); // TODO: Use more realistic values
     }
 }

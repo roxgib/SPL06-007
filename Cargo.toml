@@ -6,7 +6,7 @@ authors = ["Sam Bradshaw"]
 description = "Driver for the SPL06-007 barometric pressure sensor"
 repository = "https://github.com/roxgib/SPL06-007"
 license = "MIT"
-categories = ["embedded", "hardware-support", "no-std", "no-std::no-alloc"]
+categories = ["embedded", "hardware-support", "no-std", "no-std::no-alloc", "embedded-hal-driver"]
 
 [dependencies]
 embedded-hal = "0.2"
