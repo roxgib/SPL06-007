@@ -18,15 +18,15 @@ spl06_007 = "0.3"
 Example usage on an Arduino Uno:
 
 ```rust
-#![no_std]
-#![no_main]
+# #![no_std]
+# #![no_main]
 
 use arduino_hal::prelude::*;
-use panic_halt as _;
+# use panic_halt as _;
 
 use spl06_007::Barometer;
 
-#[arduino_hal::entry]
+# #[arduino_hal::entry]
 fn main() -> ! {
     let dp = arduino_hal::Peripherals::take().expect("Failed to take peripherals");
     let pins = arduino_hal::pins!(dp);
@@ -39,8 +39,7 @@ fn main() -> ! {
         50000,
     );
 
-    let mut barometer = Barometer::new(&mut i2c).expect("Failed to instantiate barometer");
-    barometer.init().expect("Failed to initialise barometer");
+    let mut barometer = Barometer::new(&mut i2c).expect("Failed to initialise barometer");
 
     loop {
         ufmt::uwriteln!(&mut serial, "T: {:?}", barometer.get_temperature().unwrap() as u16).void_unwrap();
@@ -50,15 +49,20 @@ fn main() -> ! {
 }
 ```
 
-It is necessary to call `init` before any other methods are called. This method will set some default values for the sensor and is suitable for most use cases. Alternatively you can set the mode, sample rate, and oversampling values manually:
+You can set the mode, sample rate, and oversampling values manually:
 
 ```rust
 barometer.set_pressure_config(SampleRate::Single, SampleRate::Eight);
 barometer.set_temperature_config(SampleRate::Single, SampleRate::Eight);
-barometer.set_mode(Mode::ContinuousPressureTemperature);
 ```
 
-This is useful if you want to change the sample rate or oversampling values, such as for more rapid updates, better precsion, or lower power draw. It is also possible to set the mode to `Mode::Standby` to reduce power consumption, and request a single measurement at a time with `Barometer::get_temperature_blocking` and `Barometer::get_pressure_blocking`.
+This is useful for more rapid updates, better precsion, or lower power draw. 
+
+It is also possible to set the mode to `Mode::Standby` to reduce power consumption.: 
+
+```rust
+barometer.set_mode(Mode::Standby);
+```
 
 <!-- Badges -->
 [crates-io]: https://crates.io/crates/spl06-007
