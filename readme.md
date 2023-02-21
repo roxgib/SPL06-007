@@ -12,7 +12,7 @@ Add the following to your Cargo.toml:
 
 ```toml
 [dependencies]
-spl06_007 = "0.2"
+spl06_007 = "0.3"
 ```
 
 Example usage on an Arduino Uno:
@@ -58,7 +58,7 @@ barometer.set_temperature_config(SampleRate::Single, SampleRate::Eight);
 barometer.set_mode(Mode::ContinuousPressureTemperature);
 ```
 
-This is useful if you want to change the sample rate or oversampling values, such as for more rapid updates. It is also possible to set the mode to `Mode::Standby` to reduce power consumption. Other modes, including measuring only when polled, are not well supported at this time.
+This is useful if you want to change the sample rate or oversampling values, such as for more rapid updates, better precsion, or lower power draw. It is also possible to set the mode to `Mode::Standby` to reduce power consumption, and request a single measurement at a time with `Barometer::get_temperature_blocking` and `Barometer::get_pressure_blocking`.
 
 <!-- Badges -->
 [crates-io]: https://crates.io/crates/spl06-007

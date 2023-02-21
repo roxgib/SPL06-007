@@ -246,12 +246,12 @@ where
     }
 
     /// Sensor data might not be available after the sensor is powered on or settings changed.
-    /// Note that you should use new_data_is_available() for checking if new data is available.
+    /// Note that you should use [Barometer::new_data_is_available] for checking if new data is available.
     pub fn sensor_data_is_ready(&mut self) -> Result<bool, E> {
         Ok(((self.read8(MEAS_CFG)? >> 6) & 0b1) == 1)
     }
 
-    /// Returns a tuple of (temperature, pressure), true if new data is available
+    /// Returns a tuple of `(temperature, pressure)`. `true` if new data is available
     pub fn new_data_is_available(&mut self) -> Result<(bool, bool), E> {
         let byte = self.read8(MEAS_CFG)?;
         Ok((((byte >> 5) & 1) == 1, ((byte >> 4) & 1) == 1))
@@ -340,8 +340,10 @@ where
     /// the sensor is in continuous mode, this function leaves the sensor in standby mode.
     ///
     /// This will not block until the reading is complete. You can check if the reading is
-    /// complete using `new_data_is_available()`. You can then read the temperature using
-    /// `get_temperature()`.
+    /// complete using [Barometer::new_data_is_available]. You can then read the temperature using
+    /// [Barometer::get_temperature].
+    /// 
+    /// For a more straightforward interface when in standby mode, see [Barometer::get_temperature_blocking].
     pub fn request_temperature_reading(&mut self) -> Result<(), E> {
         self.set_mode(Mode::Temperature)
     }
@@ -351,14 +353,16 @@ where
     /// the sensor is in continuous mode, this function leaves the sensor in standby mode.
     ///
     /// This will not block until the reading is complete. You can check if the reading is
-    /// complete using `new_data_is_available()`. You can then read the temperature using
-    /// `get_pressure()`.
+    /// complete using [Barometer::new_data_is_available]. You can then read the pressure using
+    /// [Barometer::get_pressure].
     ///
     /// Because the pressure reading is dependent on the temperature reading, it is recommended
     /// that you request a temperature reading first, and then a pressure reading. This will
     /// ensure that the temperature reading is recent. If you have recently requested a temperature
     /// reading and do not expect the temperature to have changed significantly, you can skip the
     /// temperature reading.
+    /// 
+    /// For a more straightforward interface when in standby mode, see [Barometer::get_pressure_blocking].
     pub fn request_pressure_reading(&mut self) -> Result<(), E> {
         self.set_mode(Mode::Pressure)
     }
@@ -380,8 +384,10 @@ where
     /// standby mode. It will take a new temperature reading, and then return to standby mode. If
     /// the sensor is in continuous mode, this function leaves the sensor in standby mode.
     ///
-    /// Unlike request_pressure_reading(), this function will also request a temperature reading
-    /// first, so there is no need to do this manually.
+    /// Unlike [Barometer::request_pressure_reading], this function will also request a temperature reading
+    /// first, so there is no need to do this manually. If you want both a temperature and pressure
+    /// reading, it is recommended that you use this function first and then call [Barometer::get_temperature]
+    /// to get the saved temperature reading rather than requesting a new one with [Barometer::get_temperature_blocking].
     ///
     /// This function will block until the reading is complete, and then return the result.
     pub fn get_pressure_blocking(&mut self) -> Result<f32, E> {
