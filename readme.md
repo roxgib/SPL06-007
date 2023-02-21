@@ -6,7 +6,7 @@ An I2C driver for the SPL06-007 barometric pressure and temperature sensor, inte
 
 ## Usage
 
-The driver is designed to be used with the embedded-hal and requires an I2C interface to be passed to the driver. The driver is generic over the I2C interface and the error type, allowing it to be used with any I2C implementation so long as it supports the required traits.
+The driver is designed to be used with embedded-hal and requires an I2C interface to be passed to the driver. The driver is generic over the I2C interface and the error type, allowing it to be used with any I2C implementation so long as it supports the required traits.
 
 Add the following to your Cargo.toml:
 
@@ -18,15 +18,15 @@ spl06_007 = "0.3"
 Example usage on an Arduino Uno:
 
 ```rust
-# #![no_std]
-# #![no_main]
+#![no_std]
+#![no_main]
 
 use arduino_hal::prelude::*;
-# use panic_halt as _;
+use panic_halt as _;
 
 use spl06_007::Barometer;
 
-# #[arduino_hal::entry]
+#[arduino_hal::entry]
 fn main() -> ! {
     let dp = arduino_hal::Peripherals::take().expect("Failed to take peripherals");
     let pins = arduino_hal::pins!(dp);
