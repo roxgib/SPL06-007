@@ -58,7 +58,7 @@ barometer.set_temperature_config(SampleRate::Single, SampleRate::Eight);
 
 This is useful for more rapid updates, better precsion, or lower power draw. 
 
-It is also possible to set the mode to `Mode::Standby` to reduce power consumption.: 
+It is also possible to set the mode to `Mode::Standby` to reduce power consumption: 
 
 ```rust
 barometer.set_mode(Mode::Standby);

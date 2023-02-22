@@ -2,14 +2,14 @@
 //! is available as a breakout board for the Arduino platform. This driver
 //! may also work with the SPL06-001, but this has not been tested.
 //!
-//! This sensor operates on the I2c address 0x76 and is connected to the
-//! I2C bus on the Arduino Uno. Instantiate the Barometer struct with a
-//! reference to the I2C bus. The sensor will then be ready to read
-//! temperature and pressure values.
+//! Instantiate the Barometer struct with a reference to the I2C bus. The sensor 
+//! will then be ready to read temperature and pressure values.
 //!
-//! ```rust, ignore
+//! ```rust, no_run
 //! use spl06_007::*;
-//!
+//! use embedded_hal_mock::i2c::Mock as I2c;
+//! let mut i2c = I2c::new(&[]);
+//! 
 //! let mut barometer = Barometer::new(&mut i2c).expect("Failed to instantiate barometer");
 //! let temp = barometer.get_temperature().unwrap();
 //! let pressure = barometer.get_pressure().unwrap();
@@ -18,23 +18,31 @@
 //!
 //! You can set the mode, sample rate, and oversampling values manually:
 //!
-//! ```rust, ignore
-//! barometer.set_pressure_config(SampleRate::Single, SampleRate::Eight);
-//! barometer.set_temperature_config(SampleRate::Single, SampleRate::Eight);
+//! ```rust, no_run
+//! # use spl06_007::*;
+//! # use embedded_hal_mock::i2c::Mock as I2c;
+//! # let mut i2c = I2c::new(&[]);
+//! # let mut barometer = Barometer::new(&mut i2c).expect("Failed to instantiate barometer");
+//! barometer.set_pressure_config(SampleRate::One, SampleRate::Eight);
+//! barometer.set_temperature_config(SampleRate::One, SampleRate::Eight);
 //! ```
 //!
-//! This is useful for more rapid updates, better precsion, or lower power draw. 
-//! 
-//! It is also possible to set the mode to `Mode::Standby` to reduce power consumption.: 
-//! 
-//! ```rust, ignore
+//! This is useful for more rapid updates, better precsion, or lower power draw.
+//!
+//! It is also possible to set the mode to `Mode::Standby` to reduce power consumption.:
+//!
+//! ```rust, no_run
+//! # use spl06_007::*;
+//! # use embedded_hal_mock::i2c::Mock as I2c;
+//! # let mut i2c = I2c::new(&[]);
+//! # let mut barometer = Barometer::new(&mut i2c).expect("Failed to instantiate barometer");
 //! barometer.set_mode(Mode::Standby);
 //! ```
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
-#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(any(test, doctest)), no_std)]
 
 extern crate embedded_hal as hal;
 extern crate libm;
@@ -445,33 +453,32 @@ impl SampleRate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::vec::Vec;
+    use embedded_hal_mock::i2c::{Mock as I2cMock, Transaction};
 
-    use embedded_hal_mock::i2c::{Mock as I2cMock, Transaction as I2cTransaction};
-    fn expectations(to_add: Vec<I2cTransaction>) -> Vec<I2cTransaction> {
+    fn expectations(to_add: Vec<Transaction>) -> Vec<Transaction> {
         [
             // Barometer::new
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0x80]),
-            I2cTransaction::write_read(ADDR, vec![COEF], vec![0xc, 0xbe]),
-            I2cTransaction::write_read(ADDR, vec![COEF + 1], vec![0xbe, 0xfc]),
-            I2cTransaction::write_read(ADDR, vec![COEF + 3], vec![0x13, 0xd9, 0xaf]),
-            I2cTransaction::write_read(ADDR, vec![COEF + 5], vec![0xaf, 0x2b, 0x34]),
-            I2cTransaction::write_read(ADDR, vec![COEF + 8], vec![0xf3, 0xf7]),
-            I2cTransaction::write_read(ADDR, vec![COEF + 10], vec![0x4, 0xff]),
-            I2cTransaction::write_read(ADDR, vec![COEF + 12], vec![0xda, 0x5a]),
-            I2cTransaction::write_read(ADDR, vec![COEF + 14], vec![0x0, 0xa]),
-            I2cTransaction::write_read(ADDR, vec![COEF + 16], vec![0xfb, 0x1b]),
-            I2cTransaction::write_read(ADDR, vec![CFG_REG], vec![0]),
-            I2cTransaction::write(ADDR, vec![CFG_REG, 0]),
-            I2cTransaction::write(ADDR, vec![PRS_CFG, SampleRate::Eight as u8]),
-            I2cTransaction::write_read(ADDR, vec![CFG_REG], vec![0]),
-            I2cTransaction::write(ADDR, vec![CFG_REG, 0]),
-            I2cTransaction::write(ADDR, vec![TMP_CFG, 0x80 | SampleRate::Eight as u8]),
-            I2cTransaction::write(
+            Transaction::write_read(ADDR, vec![MEAS_CFG], vec![0x80]),
+            Transaction::write_read(ADDR, vec![COEF], vec![0xc, 0xbe]),
+            Transaction::write_read(ADDR, vec![COEF + 1], vec![0xbe, 0xfc]),
+            Transaction::write_read(ADDR, vec![COEF + 3], vec![0x13, 0xd9, 0xaf]),
+            Transaction::write_read(ADDR, vec![COEF + 5], vec![0xaf, 0x2b, 0x34]),
+            Transaction::write_read(ADDR, vec![COEF + 8], vec![0xf3, 0xf7]),
+            Transaction::write_read(ADDR, vec![COEF + 10], vec![0x4, 0xff]),
+            Transaction::write_read(ADDR, vec![COEF + 12], vec![0xda, 0x5a]),
+            Transaction::write_read(ADDR, vec![COEF + 14], vec![0x0, 0xa]),
+            Transaction::write_read(ADDR, vec![COEF + 16], vec![0xfb, 0x1b]),
+            Transaction::write_read(ADDR, vec![CFG_REG], vec![0]),
+            Transaction::write(ADDR, vec![CFG_REG, 0]),
+            Transaction::write(ADDR, vec![PRS_CFG, SampleRate::Eight as u8]),
+            Transaction::write_read(ADDR, vec![CFG_REG], vec![0]),
+            Transaction::write(ADDR, vec![CFG_REG, 0]),
+            Transaction::write(ADDR, vec![TMP_CFG, 0x80 | SampleRate::Eight as u8]),
+            Transaction::write(
                 ADDR,
                 vec![MEAS_CFG, Mode::ContinuousPressureTemperature as u8],
             ),
-            I2cTransaction::write(ADDR, vec![CFG_REG, 0x00]),
+            Transaction::write(ADDR, vec![CFG_REG, 0x00]),
         ]
         .to_vec()
         .into_iter()
@@ -489,10 +496,10 @@ mod tests {
     #[test]
     fn test_barometer_read() {
         let expectations = expectations(vec![
-            I2cTransaction::write_read(ADDR, vec![0], vec![0, 1, 2]),
-            I2cTransaction::write_read(ADDR, vec![0], vec![0]),
-            I2cTransaction::write_read(ADDR, vec![0], vec![0, 1]),
-            I2cTransaction::write_read(ADDR, vec![0], vec![0, 1, 2]),
+            Transaction::write_read(ADDR, vec![0], vec![0, 1, 2]),
+            Transaction::write_read(ADDR, vec![0], vec![0]),
+            Transaction::write_read(ADDR, vec![0], vec![0, 1]),
+            Transaction::write_read(ADDR, vec![0], vec![0, 1, 2]),
         ]);
         let mut i2c = I2cMock::new(&expectations);
         let mut barometer = Barometer::new(&mut i2c).unwrap();
@@ -533,13 +540,13 @@ mod tests {
     #[test]
     fn test_barometer_get_temperature() {
         let expectations = expectations(vec![
-            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
-            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
-            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
-            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            Transaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            Transaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            Transaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
+            Transaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            Transaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
+            Transaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
+            Transaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
         ]);
         let mut i2c = I2cMock::new(&expectations);
         let mut barometer = Barometer::new(&mut i2c).unwrap();
@@ -552,21 +559,21 @@ mod tests {
     #[test]
     fn test_barometer_get_pressure() {
         let expectations = expectations(vec![
-            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
-            I2cTransaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
-            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
-            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
-            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
-            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Pressure as u8]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
-            I2cTransaction::write(ADDR, vec![MEAS_CFG, Mode::Pressure as u8]),
-            I2cTransaction::write_read(ADDR, vec![MEAS_CFG], vec![0b010000]),
-            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
-            I2cTransaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
+            Transaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            Transaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
+            Transaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            Transaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
+            Transaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            Transaction::write(ADDR, vec![MEAS_CFG, Mode::Temperature as u8]),
+            Transaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
+            Transaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            Transaction::write_read(ADDR, vec![MEAS_CFG], vec![0]),
+            Transaction::write(ADDR, vec![MEAS_CFG, Mode::Pressure as u8]),
+            Transaction::write_read(ADDR, vec![MEAS_CFG], vec![0b100000]),
+            Transaction::write(ADDR, vec![MEAS_CFG, Mode::Pressure as u8]),
+            Transaction::write_read(ADDR, vec![MEAS_CFG], vec![0b010000]),
+            Transaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            Transaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
         ]);
         let mut i2c = I2cMock::new(&expectations);
         let mut barometer = Barometer::new(&mut i2c).unwrap();
@@ -579,8 +586,8 @@ mod tests {
     #[test]
     fn test_barometer_altitude() {
         let expectations = expectations(vec![
-            I2cTransaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
-            I2cTransaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
+            Transaction::write_read(ADDR, vec![TMP], vec![0, 1, 2]),
+            Transaction::write_read(ADDR, vec![PRS], vec![0, 1, 2]),
         ]);
         let mut i2c = I2cMock::new(&expectations);
         let mut barometer = Barometer::new(&mut i2c).unwrap();
